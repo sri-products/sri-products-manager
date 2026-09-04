@@ -126,6 +126,11 @@ const Api = (() => {
 
     getDatabaseUsage: () => ({ fn: 'get_database_usage', args: {} }),
 
+    listPickupLocations: (b) => ({ fn: 'list_pickup_locations', args: { p_include_inactive: !!b.includeInactive } }),
+    createPickupLocation: (b) => ({ fn: 'create_pickup_location', args: { p_name: b.name, p_address: b.address, p_hours: b.hours || null } }),
+    updatePickupLocation: (b) => ({ fn: 'update_pickup_location', args: { p_id: b.id, p_name: b.name, p_address: b.address, p_hours: b.hours || null } }),
+    setPickupLocationActive: (b) => ({ fn: 'set_pickup_location_active', args: { p_id: b.id, p_active: !!b.active } }),
+
     listOnlineOrders: (b) => ({ fn: 'list_online_orders', args: { p_status: b.status || null } }),
     getOnlineOrderDetail: (b) => ({ fn: 'get_online_order_detail', args: { p_order_number: b.orderNumber } }),
     convertOnlineOrderToSale: (b) => ({ fn: 'convert_online_order_to_sale', args: { p_order_number: b.orderNumber } })
