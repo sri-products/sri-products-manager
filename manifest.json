@@ -1,0 +1,14 @@
+{
+  "name": "Sri Products — Business Manager",
+  "short_name": "Sri Products",
+  "description": "Sales, quotations, customers, payments, production, and inventory tracking for Sri Products.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101d33",
+  "theme_color": "#101d33",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
