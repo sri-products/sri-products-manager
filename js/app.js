@@ -175,6 +175,7 @@ const App = (() => {
     shell('More', `
       <div class="section-label">Business</div>
       <div class="panel">
+        <div class="list-row" data-go="#/online-orders"><div class="row-title">Online orders</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/quotations"><div class="row-title">Quotations</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/production"><div class="row-title">Production</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/inventory"><div class="row-title">Inventory</div><div>&#8250;</div></div>
@@ -897,6 +898,77 @@ const App = (() => {
   function screenNewProduction() { return renderProductionForm('new'); }
   function screenEditProduction(productionId) { return renderProductionForm('edit', productionId); }
 
+  // ---------- ONLINE ORDERS ----------
+  // Bridges the public storefront's orders into this app's own Sales
+  // ledger. An online order shows up here regardless of status;
+  // "Convert to sale" is only offered once (converted_sale_id is set
+  // after, and the button disappears) since conversion also releases
+  // that order's stock reservation — converting twice would release
+  // it twice.
+
+  function onlineOrderStatusBadge(status) {
+    const cls = { pending: 'badge-draft', confirmed: 'badge-sent', ready: 'badge-accepted', completed: 'badge-converted', cancelled: 'badge-expired' }[status] || 'badge-draft';
+    const label = { pending: 'Pending', confirmed: 'Confirmed', ready: 'Ready', completed: 'Completed', cancelled: 'Cancelled' }[status] || status;
+    return `<span class="badge ${cls}">${esc(label)}</span>`;
+  }
+
+  async function screenOnlineOrders() {
+    shell('Online orders', `<div class="panel" id="onlineOrderList"><div class="empty-state">Loading…</div></div>`, { activeTab: 'more' });
+    try {
+      const orders = await Api.call('listOnlineOrders', {});
+      document.getElementById('onlineOrderList').innerHTML = orders.length ? orders.map(o => `
+        <div class="list-row" data-go="#/online-orders/${esc(o.orderNumber)}">
+          <div>
+            <div class="row-title">${esc(o.customerName)} ${onlineOrderStatusBadge(o.status)}</div>
+            <div class="row-sub">${esc(o.orderNumber)} · ${fmtDate(o.createdAt)} · ${o.fulfillmentType === 'delivery' ? 'Delivery' : 'Pickup'}</div>
+            <div class="row-sub">${summarizeItems(o.items.map(i => ({ itemName: i.itemName, quantity: i.quantity, unit: i.unit })))}</div>
+          </div>
+          <div class="row-right">
+            <div class="amount">${money(o.grandTotal)}</div>
+            <div class="row-sub" style="color:${o.paymentStatus === 'paid' ? 'var(--green-700)' : 'var(--red-600)'}">${o.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}</div>
+            ${o.convertedSaleId ? `<div class="row-sub">&#8594; ${esc(o.convertedSaleId)}</div>` : ''}
+          </div>
+        </div>`).join('') : '<div class="empty-state">No online orders yet.</div>';
+      bindGoAttrs();
+    } catch (e) { document.getElementById('onlineOrderList').innerHTML = errorState(e.message); }
+  }
+
+  async function screenOnlineOrderDetail(orderNumber) {
+    shell('Online order', `<div class="empty-state">Loading…</div>`, { activeTab: 'more' });
+    let o;
+    try { o = await Api.call('getOnlineOrderDetail', { orderNumber }); } catch (e) { document.querySelector('.screen').innerHTML = errorState(e.message); return; }
+    document.querySelector('.top-bar h1').textContent = o.orderNumber;
+    const isDelivery = o.fulfillmentType === 'delivery';
+    document.querySelector('.screen').innerHTML = `
+      <div class="panel" style="padding:14px;">
+        <p><strong>${esc(o.customerName)}</strong> ${onlineOrderStatusBadge(o.status)}</p>
+        <p class="muted">${esc(o.customerPhone)} · ${fmtDate(o.createdAt)}</p>
+        <p class="muted">${isDelivery ? 'Delivery' : 'Pickup'} · ${o.paymentStatus === 'paid' ? 'Paid online' : 'Not yet paid (' + esc(o.paymentMethod) + ')'}</p>
+        ${isDelivery ? `<p class="muted">${esc(o.deliveryAddressLine1)}${o.deliveryAddressLine2 ? ', ' + esc(o.deliveryAddressLine2) : ''}, ${esc(o.deliveryCity)} — ${esc(o.deliveryPincode)}${o.deliveryLandmark ? ' (near ' + esc(o.deliveryLandmark) + ')' : ''}</p>` : ''}
+        ${o.notes ? `<p class="muted">Note: ${esc(o.notes)}</p>` : ''}
+        ${o.convertedSaleId ? `<p class="muted">Converted to sale <a href="#/sales/${esc(o.convertedSaleId)}">${esc(o.convertedSaleId)}</a></p>` : ''}
+      </div>
+      <div class="section-label">Items</div>
+      <div class="panel">${o.items.map(i => `<div class="list-row"><div class="row-title">${esc(i.itemName)}</div><div class="amount">${i.quantity} ${esc(i.unit)} × ${money(i.unitPrice)} = ${money(i.lineTotal)}</div></div>`).join('')}</div>
+      <div class="totals-panel">
+        <div class="totals-row"><span>Subtotal</span><span>${money(o.subtotal)}</span></div>
+        ${Number(o.shippingFee) > 0 ? `<div class="totals-row"><span>Delivery</span><span>${money(o.shippingFee)}</span></div>` : ''}
+        <div class="totals-row grand"><span>Total</span><span>${money(o.grandTotal)}</span></div>
+      </div>
+      ${!o.convertedSaleId && o.status !== 'cancelled' ? `<button class="btn btn-primary" id="convertOrderBtn" style="margin-top:14px;">Convert to sale</button>` : ''}
+    `;
+    const convertBtn = document.getElementById('convertOrderBtn');
+    if (convertBtn) convertBtn.onclick = async (e) => {
+      if (!confirmAction('Convert this order into a Sale? This records the stock leaving and, if already paid online, a matching payment. This cannot be undone.')) return;
+      e.target.disabled = true; e.target.textContent = 'Converting…';
+      try {
+        const res = await Api.call('convertOnlineOrderToSale', { orderNumber });
+        toast('Converted to sale ' + res.sale.SaleId + '.');
+        navigate('#/sales/' + res.sale.SaleId);
+      } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Convert to sale'; }
+    };
+  }
+
   // ---------- INVENTORY ----------
 
   async function screenInventory() {
@@ -966,10 +1038,17 @@ const App = (() => {
       const items = await Api.call('listItems', { includeInactive: true });
       document.getElementById('prodItemList').innerHTML = items.length ? items.map(i => `
         <div class="list-row">
-          <div><div class="row-title">${esc(i.Name)}${i.Active === false ? ' <span class="muted">(inactive)</span>' : ''}</div><div class="row-sub">${esc(i.Type)} · ${esc(i.Unit)}${Number(i.TaxRate) > 0 ? ' · ' + i.TaxRate + '% tax' : ''}</div></div>
-          <div style="display:flex;gap:10px;">
-            <button class="li-remove" style="color:var(--navy-700)" data-edit-item="${esc(i.ItemId)}">Edit</button>
-            <button class="li-remove" data-toggle-item="${esc(i.ItemId)}" data-active="${i.Active !== false}">${i.Active === false ? 'Reactivate' : 'Deactivate'}</button>
+          <div>
+            <div class="row-title">${esc(i.Name)}${i.Active === false ? ' <span class="muted">(inactive)</span>' : ''}</div>
+            <div class="row-sub">${esc(i.Type)} · ${esc(i.Unit)}${Number(i.TaxRate) > 0 ? ' · ' + i.TaxRate + '% tax' : ''}</div>
+            <div class="row-sub" style="color:${i.VisibleOnline ? 'var(--green-700)' : 'var(--ink-400)'}">${i.VisibleOnline ? 'Listed in online store' : 'Not listed online'}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+            <div style="display:flex;gap:10px;">
+              <button class="li-remove" style="color:var(--navy-700)" data-edit-item="${esc(i.ItemId)}">Edit</button>
+              <button class="li-remove" data-toggle-item="${esc(i.ItemId)}" data-active="${i.Active !== false}">${i.Active === false ? 'Reactivate' : 'Deactivate'}</button>
+            </div>
+            <button class="li-remove" data-toggle-online="${esc(i.ItemId)}" data-online="${!!i.VisibleOnline}">${i.VisibleOnline ? 'Unlist from store' : 'List in store'}</button>
           </div>
         </div>`).join('') : '<div class="empty-state">No products yet.</div>';
       document.querySelectorAll('[data-edit-item]').forEach(btn => btn.onclick = () => navigate('#/admin/products/' + btn.dataset.editItem + '/edit'));
@@ -977,6 +1056,14 @@ const App = (() => {
         const currentlyActive = btn.dataset.active === 'true';
         try { await Api.call('setItemActive', { itemId: btn.dataset.toggleItem, active: !currentlyActive }); State.items = null; toast(currentlyActive ? 'Product deactivated.' : 'Product reactivated.'); screenAdminProducts(); }
         catch (err) { toast(err.message); }
+      });
+      document.querySelectorAll('[data-toggle-online]').forEach(btn => btn.onclick = async () => {
+        const currentlyOnline = btn.dataset.online === 'true';
+        try {
+          await Api.call('setItemVisibleOnline', { itemId: btn.dataset.toggleOnline, visible: !currentlyOnline });
+          toast(currentlyOnline ? 'Removed from the online store.' : 'Listed in the online store — set a price under Price book if you haven\u2019t already, or it will show as unavailable.');
+          screenAdminProducts();
+        } catch (err) { toast(err.message); }
       });
     } catch (e) { document.getElementById('prodItemList').innerHTML = errorState(e.message); }
   }
@@ -1225,6 +1312,10 @@ const App = (() => {
         if (segments[1] === 'new') return screenNewSale(query.customer);
         if (segments.length === 3 && segments[2] === 'edit') return screenEditSale(segments[1]);
         return screenSaleDetail(segments[1]);
+      }
+      if (segments[0] === 'online-orders') {
+        if (segments.length === 1) return screenOnlineOrders();
+        return screenOnlineOrderDetail(segments[1]);
       }
       if (segments[0] === 'quotations') {
         if (segments.length === 1) return screenQuotations();
