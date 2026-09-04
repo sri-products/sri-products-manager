@@ -79,6 +79,7 @@ const Api = (() => {
     createItem: (b) => ({ fn: 'create_item', args: { p_item: b.item } }),
     updateItem: (b) => ({ fn: 'update_item', args: { p_item_id: b.itemId, p_updates: b.updates } }),
     setItemActive: (b) => ({ fn: 'set_item_active', args: { p_item_id: b.itemId, p_active: !!b.active } }),
+    setItemVisibleOnline: (b) => ({ fn: 'set_item_visible_online', args: { p_item_id: b.itemId, p_visible: !!b.visible } }),
 
     listPrices: (b) => ({ fn: 'list_prices', args: { p_item_id: b.itemId || null } }),
     getCurrentPrices: () => ({ fn: 'get_current_prices', args: {} }),
@@ -121,7 +122,11 @@ const Api = (() => {
     listProduction: () => ({ fn: 'list_production', args: {} }),
     getProductionDetail: (b) => ({ fn: 'get_production_detail', args: { p_production_id: b.productionId } }),
 
-    getDashboard: () => ({ fn: 'get_dashboard', args: {} })
+    getDashboard: () => ({ fn: 'get_dashboard', args: {} }),
+
+    listOnlineOrders: (b) => ({ fn: 'list_online_orders', args: { p_status: b.status || null } }),
+    getOnlineOrderDetail: (b) => ({ fn: 'get_online_order_detail', args: { p_order_number: b.orderNumber } }),
+    convertOnlineOrderToSale: (b) => ({ fn: 'convert_online_order_to_sale', args: { p_order_number: b.orderNumber } })
   };
 
   async function call(action, params) {
