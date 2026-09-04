@@ -379,6 +379,13 @@ a { color: inherit; }
 }
 .chip.active { background: var(--navy-900); color: var(--paper); border-color: var(--navy-900); }
 
+/* ---------- Usage bar (database storage) ---------- */
+
+.usage-bar-track { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; margin: 6px 0 4px; }
+.usage-bar-fill { height: 100%; border-radius: 6px; background: var(--green-700); transition: width .3s ease; }
+.usage-bar-fill.warn { background: var(--gold-600); }
+.usage-bar-fill.danger { background: var(--red-600); }
+
 /* ---------- Allocation rows (split payment) ---------- */
 
 .alloc-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
