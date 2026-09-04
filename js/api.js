@@ -124,6 +124,8 @@ const Api = (() => {
 
     getDashboard: () => ({ fn: 'get_dashboard', args: {} }),
 
+    getDatabaseUsage: () => ({ fn: 'get_database_usage', args: {} }),
+
     listOnlineOrders: (b) => ({ fn: 'list_online_orders', args: { p_status: b.status || null } }),
     getOnlineOrderDetail: (b) => ({ fn: 'get_online_order_detail', args: { p_order_number: b.orderNumber } }),
     convertOnlineOrderToSale: (b) => ({ fn: 'convert_online_order_to_sale', args: { p_order_number: b.orderNumber } })
