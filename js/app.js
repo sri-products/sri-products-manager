@@ -43,6 +43,35 @@ const App = (() => {
     setTimeout(() => el.remove(), 2600);
   }
   function navigate(hash) { location.hash = hash; }
+
+  // ---------- CSV export ----------
+  // Client-side only — the data's already in hand from the same API
+  // calls the screens use, so this is just a transform + browser
+  // download, no backend endpoint needed.
+
+  function csvCell(v) {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    // Quote (and escape internal quotes) whenever the value contains
+    // a comma, quote, or newline — otherwise it'd corrupt the column
+    // structure when opened in Excel/Sheets.
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function toCsv(rows, columns) {
+    const header = columns.map(c => csvCell(c.label)).join(',');
+    const body = rows.map(row => columns.map(c => csvCell(c.value(row))).join(',')).join('\n');
+    return header + '\n' + body;
+  }
+  function downloadCsv(filename, csvText) {
+    // Leading BOM so Excel opens UTF-8 (₹ and any non-ASCII names)
+    // correctly instead of guessing the wrong encoding.
+    const blob = new Blob(['\uFEFF' + csvText], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
   function confirmAction(msg) { return window.confirm(msg); }
   function promptText(msg, defaultVal) { return window.prompt(msg, defaultVal || ''); }
 
@@ -179,12 +208,14 @@ const App = (() => {
         <div class="list-row" data-go="#/quotations"><div class="row-title">Quotations</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/production"><div class="row-title">Production</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/inventory"><div class="row-title">Inventory</div><div>&#8250;</div></div>
+        <div class="list-row" data-go="#/export"><div class="row-title">Export data</div><div>&#8250;</div></div>
       </div>
       ${isAdmin ? `<div class="section-label">Admin</div><div class="panel">
         <div class="list-row" data-go="#/admin/products"><div class="row-title">Products</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/prices"><div class="row-title">Price book</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/bottle"><div class="row-title">Bottle adjustments</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/settings"><div class="row-title">Business settings</div><div>&#8250;</div></div>
+        <div class="list-row" data-go="#/admin/database"><div class="row-title">Database usage</div><div>&#8250;</div></div>
       </div>` : ''}
       <div class="section-label">Account</div>
       <div class="panel"><div class="list-row" id="logoutRow"><div class="row-title" style="color:var(--red-600)">Log out</div></div></div>
@@ -1258,6 +1289,127 @@ const App = (() => {
     }, { once: true });
   }
 
+  // ---------- EXPORT DATA ----------
+  // Downloads whatever the app already has via the same list*
+  // endpoints the Sales/Payments/Online orders screens use — no
+  // separate export API, just a CSV transform + browser download.
+
+  async function screenExportData() {
+    shell('Export data', `
+      <p class="muted" style="margin-bottom:14px;">Downloads a CSV of everything currently in each list — open in Excel/Sheets for accounting, backups, or sharing with an accountant.</p>
+      <div class="panel">
+        <div class="list-row" id="exportSales"><div class="row-title">Sales</div><div>&#8595;</div></div>
+        <div class="list-row" id="exportPayments"><div class="row-title">Payments</div><div>&#8595;</div></div>
+        <div class="list-row" id="exportOnlineOrders"><div class="row-title">Online orders</div><div>&#8595;</div></div>
+      </div>
+    `, { activeTab: 'more' });
+
+    function todayStamp() { return todayInputValue(); }
+
+    document.getElementById('exportSales').onclick = async (e) => {
+      const row = e.currentTarget; const original = row.innerHTML;
+      row.innerHTML = '<div class="row-title">Sales</div><div class="muted">Preparing…</div>';
+      try {
+        const sales = await Api.call('listSales', {});
+        const csv = toCsv(sales, [
+          { label: 'Sale ID', value: r => r.SaleId },
+          { label: 'Date', value: r => toDateInputValue(r.SaleDate) },
+          { label: 'Customer', value: r => r.customerName },
+          { label: 'Items', value: r => (r.items || []).map(i => `${i.itemName} ${i.quantity}${i.unit}`).join('; ') },
+          { label: 'Subtotal', value: r => r.Subtotal },
+          { label: 'Tax', value: r => r.TaxAmount },
+          { label: 'Grand Total', value: r => r.GrandTotal },
+          { label: 'Amount Received', value: r => r.AmountReceived },
+          { label: 'Outstanding', value: r => r.Outstanding },
+          { label: 'Status', value: r => r.Status },
+          { label: 'Void Reason', value: r => r.VoidReason },
+          { label: 'Created By', value: r => r.CreatedBy },
+          { label: 'Created Date', value: r => r.CreatedDate }
+        ]);
+        downloadCsv(`sales-${todayStamp()}.csv`, csv);
+      } catch (err) { toast(err.message); }
+      row.innerHTML = original; // the click listener is on this element itself, not its children — surviving an innerHTML reset of its contents
+    };
+
+    document.getElementById('exportPayments').onclick = async (e) => {
+      const row = e.currentTarget; const original = row.innerHTML;
+      row.innerHTML = '<div class="row-title">Payments</div><div class="muted">Preparing…</div>';
+      try {
+        const payments = await Api.call('listPayments', {});
+        const csv = toCsv(payments, [
+          { label: 'Payment ID', value: r => r.PaymentId },
+          { label: 'Date', value: r => toDateInputValue(r.PaymentDate) },
+          { label: 'Customer ID', value: r => r.CustomerId },
+          { label: 'Sale ID', value: r => r.SaleId },
+          { label: 'Amount', value: r => r.Amount },
+          { label: 'Method', value: r => r.Method },
+          { label: 'Notes', value: r => r.Notes },
+          { label: 'Created By', value: r => r.CreatedBy },
+          { label: 'Created Date', value: r => r.CreatedDate }
+        ]);
+        downloadCsv(`payments-${todayStamp()}.csv`, csv);
+      } catch (err) { toast(err.message); }
+      row.innerHTML = original;
+    };
+
+    document.getElementById('exportOnlineOrders').onclick = async (e) => {
+      const row = e.currentTarget; const original = row.innerHTML;
+      row.innerHTML = '<div class="row-title">Online orders</div><div class="muted">Preparing…</div>';
+      try {
+        const orders = await Api.call('listOnlineOrders', {});
+        const csv = toCsv(orders, [
+          { label: 'Order Number', value: r => r.orderNumber },
+          { label: 'Date', value: r => toDateInputValue(r.createdAt) },
+          { label: 'Customer', value: r => r.customerName },
+          { label: 'Phone', value: r => r.customerPhone },
+          { label: 'Fulfillment', value: r => r.fulfillmentType },
+          { label: 'Items', value: r => (r.items || []).map(i => `${i.itemName} ${i.quantity}${i.unit}`).join('; ') },
+          { label: 'Subtotal', value: r => r.subtotal },
+          { label: 'Shipping Fee', value: r => r.shippingFee },
+          { label: 'Grand Total', value: r => r.grandTotal },
+          { label: 'Status', value: r => r.status },
+          { label: 'Payment Status', value: r => r.paymentStatus },
+          { label: 'Payment Method', value: r => r.paymentMethod },
+          { label: 'Converted Sale ID', value: r => r.convertedSaleId }
+        ]);
+        downloadCsv(`online-orders-${todayStamp()}.csv`, csv);
+      } catch (err) { toast(err.message); }
+      row.innerHTML = original;
+    };
+  }
+
+  // ---------- DATABASE USAGE ----------
+  // Admin-only. Supabase's free tier has no automatic backups — this
+  // exists so an Admin has an actual number to watch instead of
+  // finding out you're near the free-tier limit only when a write
+  // fails. "Back up" here just means downloading a backup from the
+  // Supabase Dashboard (Database -> Backups) or running your own
+  // pg_dump — this screen doesn't perform a backup itself, it's the
+  // signal for when to go do that.
+
+  async function screenDatabaseUsage() {
+    shell('Database usage', `<div class="empty-state">Loading…</div>`, { activeTab: 'more' });
+    let usage;
+    try { usage = await Api.call('getDatabaseUsage'); } catch (e) { document.querySelector('.screen').innerHTML = errorState(e.message); return; }
+    const pct = Number(usage.percentOfFreeTier) || 0;
+    const barClass = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : '';
+    document.querySelector('.screen').innerHTML = `
+      <div class="stat-grid">
+        <div class="stat-tile wide">
+          <div class="stat-label">Total database size</div>
+          <div class="stat-value">${esc(usage.totalPretty)}</div>
+        </div>
+      </div>
+      <div class="usage-bar-track"><div class="usage-bar-fill ${barClass}" style="width:${Math.min(pct, 100)}%"></div></div>
+      <p class="muted">${pct}% of the 500&nbsp;MB free-tier limit</p>
+      ${pct >= 70 ? `<div class="field hint" style="color:var(--red-600);margin-top:10px;">Getting close to the free-tier limit — back up now (Supabase Dashboard → Database → Backups) and consider whether it's time to upgrade the plan.</div>` : `<div class="field hint" style="margin-top:10px;">Free tier has no automatic backups — back up periodically via Supabase Dashboard → Database → Backups, or your own pg_dump.</div>`}
+      <div class="section-label">Largest tables</div>
+      <div class="panel">${usage.tables.map(t => `
+        <div class="list-row"><div><div class="row-title">${esc(t.table)}</div><div class="row-sub">~${Number(t.rowEstimate).toLocaleString('en-IN')} rows</div></div><div class="amount">${esc(t.sizePretty)}</div></div>
+      `).join('') || '<div class="empty-state">No tables found.</div>'}</div>
+    `;
+  }
+
   // ---------- ADMIN: SETTINGS ----------
 
   async function screenAdminSettings() {
@@ -1313,6 +1465,7 @@ const App = (() => {
         if (segments.length === 3 && segments[2] === 'edit') return screenEditSale(segments[1]);
         return screenSaleDetail(segments[1]);
       }
+      if (segments[0] === 'export') return screenExportData();
       if (segments[0] === 'online-orders') {
         if (segments.length === 1) return screenOnlineOrders();
         return screenOnlineOrderDetail(segments[1]);
@@ -1344,6 +1497,7 @@ const App = (() => {
         if (segments[1] === 'prices') { if (segments.length === 3) return screenAdminPriceItem(segments[2]); return screenAdminPrices(); }
         if (segments[1] === 'bottle') { if (segments.length === 3) return screenAdminBottleItem(segments[2]); return screenAdminBottle(); }
         if (segments[1] === 'settings') return screenAdminSettings();
+        if (segments[1] === 'database') return screenDatabaseUsage();
       }
       return screenDashboard();
     } catch (e) { toast(e.message || 'Something went wrong.'); }
