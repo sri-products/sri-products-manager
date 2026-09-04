@@ -210,6 +210,7 @@ begin
       'Unit', i.unit,
       'TaxRate', i.tax_rate,
       'Active', i.active,
+      'VisibleOnline', i.visible_online,
       'CreatedDate', i.created_at
     ) order by i.name)
     from items i
@@ -250,6 +251,7 @@ begin
     'Unit', v_row.unit,
     'TaxRate', v_row.tax_rate,
     'Active', v_row.active,
+    'VisibleOnline', v_row.visible_online,
     'CreatedDate', v_row.created_at
   );
 end;
@@ -284,6 +286,7 @@ begin
     'Unit', v_row.unit,
     'TaxRate', v_row.tax_rate,
     'Active', v_row.active,
+    'VisibleOnline', v_row.visible_online,
     'CreatedDate', v_row.created_at
   );
 end;
@@ -310,6 +313,42 @@ begin
     'Unit', v_row.unit,
     'TaxRate', v_row.tax_rate,
     'Active', v_row.active,
+    'VisibleOnline', v_row.visible_online,
+    'CreatedDate', v_row.created_at
+  );
+end;
+$$;
+
+-- Controls whether an item appears in the public storefront's catalog
+-- (v_catalog filters on items.visible_online = true, same column
+-- create_item defaults to false for — see the comment on create_item
+-- above). This is the "show in storefront" toggle that was missing
+-- when this migration first shipped; an item still also needs a
+-- current price set (Admin -> Price book) to actually be orderable —
+-- v_catalog shows "Price unavailable"/blocks add-to-cart otherwise,
+-- same as the Business Manager's own sale-creation price check.
+create or replace function set_item_visible_online(p_item_id text, p_visible boolean) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row items;
+begin
+  perform require_admin();
+  update items set visible_online = coalesce(p_visible, false) where id = p_item_id::uuid returning * into v_row;
+  if v_row is null then
+    raise exception 'Item not found.';
+  end if;
+
+  return jsonb_build_object(
+    'ItemId', v_row.id::text,
+    'Name', v_row.name,
+    'Type', v_row.type,
+    'Unit', v_row.unit,
+    'TaxRate', v_row.tax_rate,
+    'Active', v_row.active,
+    'VisibleOnline', v_row.visible_online,
     'CreatedDate', v_row.created_at
   );
 end;
@@ -939,6 +978,7 @@ grant execute on function list_items(boolean) to authenticated;
 grant execute on function create_item(jsonb) to authenticated;
 grant execute on function update_item(text, jsonb) to authenticated;
 grant execute on function set_item_active(text, boolean) to authenticated;
+grant execute on function set_item_visible_online(text, boolean) to authenticated;
 
 grant execute on function list_prices(text) to authenticated;
 grant execute on function get_current_prices() to authenticated;
