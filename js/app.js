@@ -214,6 +214,7 @@ const App = (() => {
         <div class="list-row" data-go="#/admin/products"><div class="row-title">Products</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/prices"><div class="row-title">Price book</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/bottle"><div class="row-title">Bottle adjustments</div><div>&#8250;</div></div>
+        <div class="list-row" data-go="#/admin/pickup-locations"><div class="row-title">Pickup locations</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/settings"><div class="row-title">Business settings</div><div>&#8250;</div></div>
         <div class="list-row" data-go="#/admin/database"><div class="row-title">Database usage</div><div>&#8250;</div></div>
       </div>` : ''}
@@ -1378,6 +1379,70 @@ const App = (() => {
     };
   }
 
+  // ---------- ADMIN: PICKUP LOCATIONS ----------
+  // Manages the storefront's `pickup_locations` table — until now the
+  // only way to add/edit an address was Supabase's Table Editor
+  // directly. Soft-delete (Active toggle), same pattern as Products,
+  // since a location referenced by a past order shouldn't vanish.
+
+  async function screenAdminPickupLocations() {
+    shell('Pickup locations', `<div class="panel" id="pickupLocList"><div class="empty-state">Loading…</div></div>`, { activeTab: 'more', actionLabel: '+ New', onAction: () => navigate('#/admin/pickup-locations/new') });
+    try {
+      const locations = await Api.call('listPickupLocations', { includeInactive: true });
+      document.getElementById('pickupLocList').innerHTML = locations.length ? locations.map(l => `
+        <div class="list-row">
+          <div>
+            <div class="row-title">${esc(l.name)}${l.active === false ? ' <span class="muted">(inactive)</span>' : ''}</div>
+            <div class="row-sub">${esc(l.address)}</div>
+            ${l.hours ? `<div class="row-sub">${esc(l.hours)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="li-remove" style="color:var(--navy-700)" data-edit-loc="${esc(l.id)}">Edit</button>
+            <button class="li-remove" data-toggle-loc="${esc(l.id)}" data-active="${l.active !== false}">${l.active === false ? 'Reactivate' : 'Deactivate'}</button>
+          </div>
+        </div>`).join('') : '<div class="empty-state">No pickup locations yet — add one so customers can choose pickup at checkout.</div>';
+      document.querySelectorAll('[data-edit-loc]').forEach(btn => btn.onclick = () => navigate('#/admin/pickup-locations/' + btn.dataset.editLoc + '/edit'));
+      document.querySelectorAll('[data-toggle-loc]').forEach(btn => btn.onclick = async () => {
+        const currentlyActive = btn.dataset.active === 'true';
+        try { await Api.call('setPickupLocationActive', { id: btn.dataset.toggleLoc, active: !currentlyActive }); toast(currentlyActive ? 'Location deactivated.' : 'Location reactivated.'); screenAdminPickupLocations(); }
+        catch (err) { toast(err.message); }
+      });
+    } catch (e) { document.getElementById('pickupLocList').innerHTML = errorState(e.message); }
+  }
+
+  async function renderPickupLocationForm(mode, locationId) {
+    shell(mode === 'edit' ? 'Edit pickup location' : 'New pickup location', `<div class="empty-state">Loading…</div>`, { activeTab: 'more' });
+    let existing = null;
+    if (mode === 'edit') {
+      const locations = await Api.call('listPickupLocations', { includeInactive: true });
+      existing = locations.find(l => l.id === locationId);
+      if (!existing) { document.querySelector('.screen').innerHTML = errorState('Pickup location not found.'); return; }
+    }
+    document.querySelector('.screen').innerHTML = `
+      <div class="field"><label>Name</label><input id="locName" placeholder="e.g. Sri Products — Main Counter" value="${esc(existing ? existing.name : '')}"></div>
+      <div class="field"><label>Address</label><textarea id="locAddress" rows="2" placeholder="Full pickup address">${esc(existing ? existing.address : '')}</textarea></div>
+      <div class="field"><label>Hours (optional)</label><input id="locHours" placeholder="e.g. Mon–Sat, 9am–7pm" value="${esc(existing && existing.hours ? existing.hours : '')}"></div>
+      <button class="btn btn-primary" id="saveLoc">${mode === 'edit' ? 'Save changes' : 'Save pickup location'}</button>
+    `;
+    document.getElementById('saveLoc').onclick = async (e) => {
+      const name = document.getElementById('locName').value.trim();
+      const address = document.getElementById('locAddress').value.trim();
+      const hours = document.getElementById('locHours').value.trim();
+      if (!name) { toast('Enter a name.'); return; }
+      if (!address) { toast('Enter an address.'); return; }
+      e.target.disabled = true; e.target.textContent = 'Saving…';
+      try {
+        if (mode === 'edit') await Api.call('updatePickupLocation', { id: locationId, name, address, hours });
+        else await Api.call('createPickupLocation', { name, address, hours });
+        toast(mode === 'edit' ? 'Pickup location updated.' : 'Pickup location added.');
+        navigate('#/admin/pickup-locations');
+      } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = mode === 'edit' ? 'Save changes' : 'Save pickup location'; }
+    };
+  }
+
+  function screenNewPickupLocation() { return renderPickupLocationForm('new'); }
+  function screenEditPickupLocation(locationId) { return renderPickupLocationForm('edit', locationId); }
+
   // ---------- DATABASE USAGE ----------
   // Admin-only. Supabase's free tier has no automatic backups — this
   // exists so an Admin has an actual number to watch instead of
@@ -1496,6 +1561,11 @@ const App = (() => {
         }
         if (segments[1] === 'prices') { if (segments.length === 3) return screenAdminPriceItem(segments[2]); return screenAdminPrices(); }
         if (segments[1] === 'bottle') { if (segments.length === 3) return screenAdminBottleItem(segments[2]); return screenAdminBottle(); }
+        if (segments[1] === 'pickup-locations') {
+          if (segments[2] === 'new') return screenNewPickupLocation();
+          if (segments.length === 4 && segments[3] === 'edit') return screenEditPickupLocation(segments[2]);
+          return screenAdminPickupLocations();
+        }
         if (segments[1] === 'settings') return screenAdminSettings();
         if (segments[1] === 'database') return screenDatabaseUsage();
       }
